@@ -66,29 +66,13 @@ const withRetry = async (fn, retries = 3) => {
 
     stop();
 
-    const progressbar = initializeProgressbar(matchLinks.length);
-    const limit = pLimit(cliOptions.concurrency);
-
     const matchData = {};
-    let processedCount = 0;
+    matchLinks.forEach((matchLink) => {
+      // The matchLinks array now contains the fully populated match data objects
+      // mapping them by matchId to maintain the specific output structure
+      matchData[matchLink.matchId] = matchLink;
+    });
 
-    const tasks = matchLinks.map((matchLink) =>
-      limit(async () => {
-        const data = await withRetry(() => getMatchData(context, matchLink));
-        matchData[matchLink.id] = data;
-
-        processedCount += 1;
-        if (processedCount % cliOptions.saveInterval === 0) {
-          writeDataToFile(matchData, fileName, fileType);
-        }
-
-        progressbar.increment();
-      })
-    );
-
-    await Promise.all(tasks);
-
-    progressbar.stop();
     writeDataToFile(matchData, fileName, fileType);
 
     console.info("\n✅ Data collection and file writing completed!");

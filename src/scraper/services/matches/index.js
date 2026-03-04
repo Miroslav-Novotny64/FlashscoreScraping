@@ -36,22 +36,91 @@ export const getMatchLinks = async (context, leagueSeasonUrl, type) => {
 
   await waitForSelectorSafe(page, [MATCH_SELECTOR]);
 
-  const matchIdList = await page.evaluate(() => {
-    return Array.from(
-      document.querySelectorAll(
-        ".event__match.event__match--static.event__match--twoLine"
-      )
-    ).map((element) => {
-      const id = element?.id?.replace("g_1_", "");
-      const url = element.querySelector("a.eventRowLink")?.href ?? null;
-      return { id, url };
-    });
+  const matchDataList = await page.evaluate(() => {
+    const elements = Array.from(
+      document.querySelectorAll(".event__round, .event__header, .event__match")
+    );
+    
+    let currentStage = "WORLD CHAMPIONSHIP"; // Fallback stage
+    const matches = [];
+
+    for (const el of elements) {
+      if (el.classList.contains("event__round")) {
+        currentStage = el.innerText.trim();
+      } else if (el.classList.contains("event__match")) {
+        const id = el.id?.replace("g_1_", "")?.replace("g_4_", "");
+        const url = el.querySelector("a.eventRowLink")?.href ?? null;
+        
+        // Extract basic data from the row
+        const dateRaw = el.querySelector(".event__time")?.innerText.trim();
+        // dateRaw format is typically "16.05. 20:20" or "16.05. 20:20\nPen"
+        const date = dateRaw?.split('\n')[0]?.trim(); 
+        
+        const homeName = el.querySelector(".event__participant--home")?.innerText.trim();
+        const homeImage = el.querySelector(".event__logo--home")?.src;
+        
+        const awayName = el.querySelector(".event__participant--away")?.innerText.trim();
+        const awayImage = el.querySelector(".event__logo--away")?.src;
+        
+        const homeScoreRaw = el.querySelector(".event__score--home")?.innerText.trim();
+        const awayScoreRaw = el.querySelector(".event__score--away")?.innerText.trim();
+        
+        const isNotStarted = homeScoreRaw === "-" || !homeScoreRaw;
+        
+        let finalHomeScore = homeScoreRaw;
+        let finalAwayScore = awayScoreRaw;
+
+        if (!isNotStarted) {
+          // Attempt to calculate regulation time score (sum of periods 1-3)
+          let homeRegScore = 0;
+          let awayRegScore = 0;
+          let hasPeriods = false;
+
+          for (let p = 1; p <= 3; p++) {
+            const hPart = el.querySelector(`.event__part--home.event__part--${p}`)?.innerText.trim();
+            const aPart = el.querySelector(`.event__part--away.event__part--${p}`)?.innerText.trim();
+            if (hPart && aPart) {
+              homeRegScore += parseInt(hPart, 10);
+              awayRegScore += parseInt(aPart, 10);
+              hasPeriods = true;
+            }
+          }
+
+          if (hasPeriods) {
+            finalHomeScore = homeRegScore.toString();
+            finalAwayScore = awayRegScore.toString();
+          }
+        }
+        
+        const result = isNotStarted ? {} : {
+          home: finalHomeScore,
+          away: finalAwayScore,
+          regulationTime: undefined,
+          penalties: undefined
+        };
+        
+        matches.push({
+          matchId: id,
+          url,
+          stage: currentStage,
+          date,
+          status: isNotStarted ? "NOT STARTED" : "FINISHED",
+          home: { name: homeName, image: homeImage },
+          away: { name: awayName, image: awayImage },
+          result,
+          information: [],
+          statistics: []
+        });
+      }
+    }
+    
+    return matches;
   });
 
   await page.close();
 
-  console.info(`✅ Found ${matchIdList.length} matches for ${type}`);
-  return matchIdList;
+  console.info(`✅ Found ${matchDataList.length} matches for ${type}`);
+  return matchDataList;
 };
 
 export const getMatchData = async (context, { id: matchId, url }) => {
