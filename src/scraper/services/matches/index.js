@@ -56,11 +56,15 @@ export const getMatchLinks = async (context, leagueSeasonUrl, type) => {
         // dateRaw format is typically "16.05. 20:20" or "16.05. 20:20\nPen"
         const date = dateRaw?.split('\n')[0]?.trim(); 
         
-        const homeName = el.querySelector(".event__participant--home")?.innerText.trim();
-        const homeImage = el.querySelector(".event__logo--home")?.src;
+        const homeName = el.querySelector(".event__participant--home")?.innerText.trim() ||
+                         el.querySelector(".event__homeParticipant [data-testid='wcl-scores-simple-text-01']")?.innerText.trim();
+        const homeImage = el.querySelector(".event__logo--home")?.src ||
+                          el.querySelector(".event__homeParticipant img")?.src;
         
-        const awayName = el.querySelector(".event__participant--away")?.innerText.trim();
-        const awayImage = el.querySelector(".event__logo--away")?.src;
+        const awayName = el.querySelector(".event__participant--away")?.innerText.trim() ||
+                         el.querySelector(".event__awayParticipant [data-testid='wcl-scores-simple-text-01']")?.innerText.trim();
+        const awayImage = el.querySelector(".event__logo--away")?.src ||
+                          el.querySelector(".event__awayParticipant img")?.src;
         
         const homeScoreRaw = el.querySelector(".event__score--home")?.innerText.trim();
         const awayScoreRaw = el.querySelector(".event__score--away")?.innerText.trim();
