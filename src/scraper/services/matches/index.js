@@ -38,39 +38,62 @@ export const getMatchLinks = async (context, leagueSeasonUrl, type) => {
 
   const matchDataList = await page.evaluate(() => {
     const elements = Array.from(
-      document.querySelectorAll(".event__round, .event__header, .event__match")
+      document.querySelectorAll(".headerLeague__wrapper, .event__round, .event__match"),
     );
-    
-    let currentStage = "WORLD CHAMPIONSHIP"; // Fallback stage
+
+    let currentStage = ""; // Sub-level round label (e.g. "SEMI-FINALS", "ROUND 1")
+    let currentSection = ""; // Top-level section header (e.g. "World Cup - Qualification")
     const matches = [];
 
     for (const el of elements) {
-      if (el.classList.contains("event__round")) {
+      if (el.classList.contains("headerLeague__wrapper")) {
+        // Top-level section divider — reset round label and track section name
+        currentSection = el.innerText.trim();
+        currentStage = "";
+      } else if (el.classList.contains("event__round")) {
         currentStage = el.innerText.trim();
       } else if (el.classList.contains("event__match")) {
+        // Skip matches that belong to a qualifications section
+        if (/qualif/i.test(currentSection)) continue;
         const id = el.id?.replace("g_1_", "")?.replace("g_4_", "");
         const url = el.querySelector("a.eventRowLink")?.href ?? null;
-        
+
         // Extract basic data from the row
         const dateRaw = el.querySelector(".event__time")?.innerText.trim();
         // dateRaw format is typically "16.05. 20:20" or "16.05. 20:20\nPen"
-        const date = dateRaw?.split('\n')[0]?.trim(); 
-        
-        const homeName = el.querySelector(".event__participant--home")?.innerText.trim() ||
-                         el.querySelector(".event__homeParticipant [data-testid='wcl-scores-simple-text-01']")?.innerText.trim();
-        const homeImage = el.querySelector(".event__logo--home")?.src ||
-                          el.querySelector(".event__homeParticipant img")?.src;
-        
-        const awayName = el.querySelector(".event__participant--away")?.innerText.trim() ||
-                         el.querySelector(".event__awayParticipant [data-testid='wcl-scores-simple-text-01']")?.innerText.trim();
-        const awayImage = el.querySelector(".event__logo--away")?.src ||
-                          el.querySelector(".event__awayParticipant img")?.src;
-        
-        const homeScoreRaw = el.querySelector(".event__score--home")?.innerText.trim();
-        const awayScoreRaw = el.querySelector(".event__score--away")?.innerText.trim();
-        
+        const date = dateRaw?.split("\n")[0]?.trim();
+
+        const homeName =
+          el.querySelector(".event__participant--home")?.innerText.trim() ||
+          el
+            .querySelector(
+              ".event__homeParticipant [data-testid='wcl-scores-simple-text-01']",
+            )
+            ?.innerText.trim();
+        const homeImage =
+          el.querySelector(".event__logo--home")?.src ||
+          el.querySelector(".event__homeParticipant img")?.src;
+
+        const awayName =
+          el.querySelector(".event__participant--away")?.innerText.trim() ||
+          el
+            .querySelector(
+              ".event__awayParticipant [data-testid='wcl-scores-simple-text-01']",
+            )
+            ?.innerText.trim();
+        const awayImage =
+          el.querySelector(".event__logo--away")?.src ||
+          el.querySelector(".event__awayParticipant img")?.src;
+
+        const homeScoreRaw = el
+          .querySelector(".event__score--home")
+          ?.innerText.trim();
+        const awayScoreRaw = el
+          .querySelector(".event__score--away")
+          ?.innerText.trim();
+
         const isNotStarted = homeScoreRaw === "-" || !homeScoreRaw;
-        
+
         let finalHomeScore = homeScoreRaw;
         let finalAwayScore = awayScoreRaw;
 
@@ -81,8 +104,12 @@ export const getMatchLinks = async (context, leagueSeasonUrl, type) => {
           let hasPeriods = false;
 
           for (let p = 1; p <= 3; p++) {
-            const hPart = el.querySelector(`.event__part--home.event__part--${p}`)?.innerText.trim();
-            const aPart = el.querySelector(`.event__part--away.event__part--${p}`)?.innerText.trim();
+            const hPart = el
+              .querySelector(`.event__part--home.event__part--${p}`)
+              ?.innerText.trim();
+            const aPart = el
+              .querySelector(`.event__part--away.event__part--${p}`)
+              ?.innerText.trim();
             if (hPart && aPart) {
               homeRegScore += parseInt(hPart, 10);
               awayRegScore += parseInt(aPart, 10);
@@ -95,14 +122,16 @@ export const getMatchLinks = async (context, leagueSeasonUrl, type) => {
             finalAwayScore = awayRegScore.toString();
           }
         }
-        
-        const result = isNotStarted ? {} : {
-          home: finalHomeScore,
-          away: finalAwayScore,
-          regulationTime: undefined,
-          penalties: undefined
-        };
-        
+
+        const result = isNotStarted
+          ? {}
+          : {
+              home: finalHomeScore,
+              away: finalAwayScore,
+              regulationTime: undefined,
+              penalties: undefined,
+            };
+
         matches.push({
           matchId: id,
           url,
@@ -113,11 +142,11 @@ export const getMatchLinks = async (context, leagueSeasonUrl, type) => {
           away: { name: awayName, image: awayImage },
           result,
           information: [],
-          statistics: []
+          statistics: [],
         });
       }
     }
-    
+
     return matches;
   });
 
@@ -178,7 +207,7 @@ const extractMatchData = async (page) => {
   return await page.evaluate(() => {
     return {
       stage: Array.from(
-        document.querySelectorAll("span[data-testid='wcl-scores-overline-03']")
+        document.querySelectorAll("span[data-testid='wcl-scores-overline-03']"),
       )?.[2]
         ?.innerText.trim()
         ?.split(" - ")
@@ -194,43 +223,43 @@ const extractMatchData = async (page) => {
       home: {
         name: document
           .querySelector(
-            ".duelParticipant__home .participant__participantName.participant__overflow"
+            ".duelParticipant__home .participant__participantName.participant__overflow",
           )
           ?.innerText.trim(),
         image: document.querySelector(
-          ".duelParticipant__home .participant__image"
+          ".duelParticipant__home .participant__image",
         )?.src,
       },
       away: {
         name: document
           .querySelector(
-            ".duelParticipant__away .participant__participantName.participant__overflow"
+            ".duelParticipant__away .participant__participantName.participant__overflow",
           )
           ?.innerText.trim(),
         image: document.querySelector(
-          ".duelParticipant__away .participant__image"
+          ".duelParticipant__away .participant__image",
         )?.src,
       },
       result: {
         home: Array.from(
           document.querySelectorAll(
-            ".detailScore__wrapper span:not(.detailScore__divider)"
-          )
+            ".detailScore__wrapper span:not(.detailScore__divider)",
+          ),
         )?.[0]?.innerText.trim(),
         away: Array.from(
           document.querySelectorAll(
-            ".detailScore__wrapper span:not(.detailScore__divider)"
-          )
+            ".detailScore__wrapper span:not(.detailScore__divider)",
+          ),
         )?.[1]?.innerText.trim(),
         regulationTime: document
           .querySelector(".detailScore__fullTime")
           ?.innerText.trim()
           .replace(/[\n()]/g, ""),
         penalties: Array.from(
-          document.querySelectorAll('[data-testid="wcl-scores-overline-02"]')
+          document.querySelectorAll('[data-testid="wcl-scores-overline-02"]'),
         )
           .find(
-            (element) => element.innerText.trim().toLowerCase() === "penalties"
+            (element) => element.innerText.trim().toLowerCase() === "penalties",
           )
           ?.nextElementSibling?.innerText?.trim()
           .replace(/\s+/g, ""),
@@ -243,8 +272,8 @@ const extractMatchInformation = async (page) => {
   return await page.evaluate(async () => {
     const elements = Array.from(
       document.querySelectorAll(
-        "div[data-testid='wcl-summaryMatchInformation'] > div"
-      )
+        "div[data-testid='wcl-summaryMatchInformation'] > div",
+      ),
     );
     return elements.reduce((acc, element, index) => {
       if (index % 2 === 0) {
@@ -267,20 +296,20 @@ const extractMatchInformation = async (page) => {
 const extractMatchStatistics = async (page) => {
   return await page.evaluate(async () => {
     return Array.from(
-      document.querySelectorAll("div[data-testid='wcl-statistics']")
+      document.querySelectorAll("div[data-testid='wcl-statistics']"),
     ).map((element) => ({
       category: element
         .querySelector("div[data-testid='wcl-statistics-category']")
         ?.innerText.trim(),
       homeValue: Array.from(
         element.querySelectorAll(
-          "div[data-testid='wcl-statistics-value'] > strong"
-        )
+          "div[data-testid='wcl-statistics-value'] > strong",
+        ),
       )?.[0]?.innerText.trim(),
       awayValue: Array.from(
         element.querySelectorAll(
-          "div[data-testid='wcl-statistics-value'] > strong"
-        )
+          "div[data-testid='wcl-statistics-value'] > strong",
+        ),
       )?.[1]?.innerText.trim(),
     }));
   });
