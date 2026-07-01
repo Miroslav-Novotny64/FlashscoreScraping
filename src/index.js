@@ -1,12 +1,11 @@
 import { createServer } from "http";
-import { chromium } from "playwright";
 import { BASE_URL } from "./constants/index.js";
+import { browserManager } from "./browser.js";
 import { getMatchLinks } from "./scraper/services/matches/index.js";
 
 const PORT = process.env.PORT || 8080;
 
 const server = createServer(async (req, res) => {
-  // Setup CORS headers
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
@@ -15,48 +14,82 @@ const server = createServer(async (req, res) => {
     res.statusCode = 204;
     return res.end();
   }
-  
+
   const url = new URL(req.url, `http://${req.headers.host}`);
-  
+
   if (req.method === "GET" && url.pathname === "/health") {
-    res.statusCode = 200;
+    const ready = browserManager.isReady();
+    res.statusCode = ready ? 200 : 503;
     res.setHeader("Content-Type", "application/json");
-    return res.end(JSON.stringify({ status: "ok" }));
+    return res.end(
+      JSON.stringify({
+        status: ready ? "ok" : "degraded",
+        browser: ready ? "connected" : "not connected",
+      }),
+    );
   }
-  
-  if (req.method === "GET" && (url.pathname === "/" || url.pathname === "/api/scrape")) {
+
+  if (
+    req.method === "GET" &&
+    (url.pathname === "/" || url.pathname === "/api/scrape")
+  ) {
     const sport = url.searchParams.get("sport");
     const country = url.searchParams.get("country");
     const league = url.searchParams.get("league");
-    
+
     if (!sport || !country || !league) {
       res.statusCode = 400;
       res.setHeader("Content-Type", "application/json");
-      return res.end(JSON.stringify({ error: "Missing required query parameters: sport, country, league" }));
+      return res.end(
+        JSON.stringify({
+          error: "Missing required query parameters: sport, country, league",
+        }),
+      );
     }
-    
-    let browser;
+
+    if (!browserManager.acquireScrapeSlot()) {
+      res.statusCode = 429;
+      res.setHeader("Content-Type", "application/json");
+      res.setHeader("Retry-After", "30");
+      return res.end(
+        JSON.stringify({
+          error: "Scraper is busy, try again later",
+        }),
+      );
+    }
+
     let context;
     try {
-      // Launch headless browser using playwright
-      browser = await chromium.launch({ headless: true, args: ["--no-sandbox", "--disable-setuid-sandbox"] });
-      context = await browser.newContext();
-      
-      const seasonUrl = `${BASE_URL}/${sport}/${country}/${league}`.toLowerCase();
+      context = await browserManager.createContext();
+
+      const seasonUrl =
+        `${BASE_URL}/${sport}/${country}/${league}`.toLowerCase();
       console.info(`Scraping ${seasonUrl}...`);
-      
-      const matchLinksResults = await getMatchLinks(context, seasonUrl, "results");
-      const matchLinksFixtures = await getMatchLinks(context, seasonUrl, "fixtures");
-      
+
+      const matchLinksResults = await getMatchLinks(
+        context,
+        seasonUrl,
+        "results",
+      );
+      const matchLinksFixtures = await getMatchLinks(
+        context,
+        seasonUrl,
+        "fixtures",
+      );
+
       const matchLinks = [...matchLinksFixtures, ...matchLinksResults];
 
       if (matchLinks.length === 0) {
         res.statusCode = 404;
         res.setHeader("Content-Type", "application/json");
-        return res.end(JSON.stringify({ error: "No matches found. Please verify that the league name provided is correct" }));
+        return res.end(
+          JSON.stringify({
+            error:
+              "No matches found. Please verify that the league name provided is correct",
+          }),
+        );
       }
 
-      // Convert array into a dictionary mapping matchId to matchData
       const matchData = {};
       matchLinks.forEach((matchLink) => {
         matchData[matchLink.matchId] = matchLink;
@@ -67,20 +100,58 @@ const server = createServer(async (req, res) => {
       return res.end(JSON.stringify(matchData));
     } catch (error) {
       console.error("Scraping error:", error);
+      const message = error instanceof Error ? error.message : String(error);
+      if (/browser|closed|context|launch/i.test(message)) {
+        await browserManager.close();
+      }
       res.statusCode = 500;
       res.setHeader("Content-Type", "application/json");
-      return res.end(JSON.stringify({ error: "Scraping failed", details: error.message }));
+      return res.end(
+        JSON.stringify({ error: "Scraping failed", details: message }),
+      );
     } finally {
-      if (context) await context.close();
-      if (browser) await browser.close();
+      if (context) {
+        try {
+          await context.close();
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          console.warn(`Error closing browser context: ${message}`);
+        }
+      }
+      browserManager.releaseScrapeSlot();
+      try {
+        await browserManager.maybeRestartBrowser();
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.warn(`Error during browser restart check: ${message}`);
+      }
     }
-  } else {
-    res.statusCode = 404;
-    res.setHeader("Content-Type", "application/json");
-    res.end(JSON.stringify({ error: "Not Found" }));
   }
+
+  res.statusCode = 404;
+  res.setHeader("Content-Type", "application/json");
+  res.end(JSON.stringify({ error: "Not Found" }));
 });
 
-server.listen(PORT, "0.0.0.0", () => {
+const shutdown = async (signal) => {
+  console.info(`Received ${signal}, shutting down...`);
+  server.close();
+  await browserManager.close();
+  process.exit(0);
+};
+
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT", () => shutdown("SIGINT"));
+
+server.listen(PORT, "0.0.0.0", async () => {
   console.info(`Server listening on port ${PORT}`);
+  try {
+    await browserManager.warmup();
+    console.info("Chromium warmup complete");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(
+      `Chromium warmup failed, will retry on first scrape: ${message}`,
+    );
+  }
 });
