@@ -35,10 +35,30 @@ export const getMatchLinks = async (context, leagueSeasonUrl, type) => {
   }
 
   await waitForSelectorSafe(page, [MATCH_SELECTOR]);
+  await page.waitForTimeout(500);
 
   const matchDataList = await page.evaluate(() => {
+    const extractDate = (el) => {
+      const candidates = [
+        el.querySelector(".event__time"),
+        el.querySelector(".event__stageTime--date"),
+        el.querySelector("[class*='event__stageTime']"),
+        el.querySelector("[data-testid='wcl-dateContent']"),
+        el.querySelector("[class*='wcl-dateContent']"),
+      ];
+      for (const node of candidates) {
+        const raw = node?.innerText?.trim();
+        if (!raw) continue;
+        const date = raw.split("\n")[0]?.trim();
+        if (date) return date;
+      }
+      return undefined;
+    };
+
     const elements = Array.from(
-      document.querySelectorAll(".headerLeague__wrapper, .event__round, .event__match"),
+      document.querySelectorAll(
+        ".headerLeague__wrapper, .event__round, .event__match.event__match--static.event__match--twoLine, .event__match",
+      ),
     );
 
     let currentStage = ""; // Sub-level round label (e.g. "SEMI-FINALS", "ROUND 1")
@@ -57,11 +77,10 @@ export const getMatchLinks = async (context, leagueSeasonUrl, type) => {
         if (/qualif/i.test(currentSection)) continue;
         const id = el.id?.replace("g_1_", "")?.replace("g_4_", "");
         const url = el.querySelector("a.eventRowLink")?.href ?? null;
+        const midFromUrl = url?.match(/[?&]mid=([^&]+)/)?.[1];
+        const matchId = id || midFromUrl;
 
-        // Extract basic data from the row
-        const dateRaw = el.querySelector(".event__time")?.innerText.trim();
-        // dateRaw format is typically "16.05. 20:20" or "16.05. 20:20\nPen"
-        const date = dateRaw?.split("\n")[0]?.trim();
+        const date = extractDate(el);
 
         const homeName =
           el.querySelector(".event__participant--home")?.innerText.trim() ||
@@ -133,7 +152,7 @@ export const getMatchLinks = async (context, leagueSeasonUrl, type) => {
             };
 
         matches.push({
-          matchId: id,
+          matchId,
           url,
           stage: currentStage,
           date,
@@ -152,8 +171,18 @@ export const getMatchLinks = async (context, leagueSeasonUrl, type) => {
 
   await page.close();
 
-  console.info(`✅ Found ${matchDataList.length} matches for ${type}`);
-  return matchDataList;
+  const validMatches = matchDataList.filter(
+    (match) => match.home?.name && match.away?.name && match.date,
+  );
+  if (validMatches.length < matchDataList.length) {
+    console.warn(
+      `⚠️  ${type}: ${matchDataList.length - validMatches.length} matches missing team names or date`,
+    );
+  }
+  console.info(
+    `✅ Found ${validMatches.length} valid matches for ${type} (${matchDataList.length} raw)`,
+  );
+  return validMatches;
 };
 
 export const getMatchData = async (context, { id: matchId, url }) => {

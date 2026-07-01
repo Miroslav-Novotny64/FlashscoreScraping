@@ -91,12 +91,18 @@ const server = createServer(async (req, res) => {
       }
 
       const matchData = {};
-      matchLinks.forEach((matchLink) => {
-        matchData[matchLink.matchId] = matchLink;
-      });
+      for (const matchLink of matchLinks) {
+        const key = matchLink.matchId ?? matchLink.url;
+        if (!key) continue;
+        matchData[key] = matchLink;
+      }
+
+      const payloadCount = Object.keys(matchData).length;
+      console.info(`✅ Returning ${payloadCount} matches to API client`);
 
       res.statusCode = 200;
       res.setHeader("Content-Type", "application/json");
+      res.setHeader("Cache-Control", "no-store");
       return res.end(JSON.stringify(matchData));
     } catch (error) {
       console.error("Scraping error:", error);
