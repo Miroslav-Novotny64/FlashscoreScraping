@@ -47,16 +47,7 @@ const server = createServer(async (req, res) => {
       );
     }
 
-    if (!browserManager.acquireScrapeSlot()) {
-      res.statusCode = 429;
-      res.setHeader("Content-Type", "application/json");
-      res.setHeader("Retry-After", "30");
-      return res.end(
-        JSON.stringify({
-          error: "Scraper is busy, try again later",
-        }),
-      );
-    }
+    await browserManager.waitForScrapeSlot();
 
     let context;
     try {

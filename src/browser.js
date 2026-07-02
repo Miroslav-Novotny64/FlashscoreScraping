@@ -19,6 +19,7 @@ class BrowserManager {
   #launching = null;
   #scrapeCount = 0;
   #busy = false;
+  #waitQueue = [];
 
   isBusy() {
     return this.#busy;
@@ -88,13 +89,35 @@ class BrowserManager {
     return browser.newContext();
   }
 
+  /** @deprecated Use waitForScrapeSlot() — returns false when busy (429 path) */
   acquireScrapeSlot() {
     if (this.#busy) return false;
     this.#busy = true;
     return true;
   }
 
+  async waitForScrapeSlot() {
+    if (!this.#busy) {
+      this.#busy = true;
+      return;
+    }
+
+    const queueSize = this.#waitQueue.length + 1;
+    console.info(
+      `Scraper busy, queuing request (position ${queueSize} in queue)`,
+    );
+
+    await new Promise((resolve) => {
+      this.#waitQueue.push(resolve);
+    });
+  }
+
   releaseScrapeSlot() {
+    const next = this.#waitQueue.shift();
+    if (next) {
+      next();
+      return;
+    }
     this.#busy = false;
   }
 
