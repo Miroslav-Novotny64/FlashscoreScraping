@@ -37,13 +37,39 @@ export const getMatchLinks = async (context, leagueSeasonUrl, type) => {
   await waitForSelectorSafe(page, [MATCH_SELECTOR]);
   await page.waitForTimeout(500);
 
-  const matchDataList = await page.evaluate(() => {
+  const matchDataList = await page.evaluate((pageType) => {
     const parseListScore = (raw) => {
       if (!raw || raw === "-") return null;
       const firstLine = raw.split("\n")[0]?.trim() ?? "";
       const numMatch = firstLine.match(/^(\d+)/);
       return numMatch ? numMatch[1] : null;
     };
+
+    const parseFeedByMatchId = () => {
+      const feeds = window.cjs?.initialFeeds;
+      if (!feeds) return {};
+
+      const raw =
+        feeds[pageType]?.data ||
+        (pageType === "results"
+          ? feeds.results?.data
+          : feeds.fixtures?.data);
+      if (!raw) return {};
+
+      const byId = {};
+      for (const chunk of raw.split("~AA÷").slice(1)) {
+        const id = chunk.split("¬")[0];
+        const fields = {};
+        for (const part of chunk.split("¬")) {
+          const m = part.match(/^([A-Z]+)÷(.*)$/);
+          if (m) fields[m[1]] = m[2];
+        }
+        byId[id] = fields;
+      }
+      return byId;
+    };
+
+    const feedByMatchId = parseFeedByMatchId();
 
     const extractDate = (el) => {
       const candidates = [
@@ -144,11 +170,22 @@ export const getMatchLinks = async (context, leagueSeasonUrl, type) => {
           }
         }
 
+        const stageIndicator = el
+          .querySelector("[class*='stageContent']")
+          ?.innerText?.trim();
+        const feed = matchId ? feedByMatchId[matchId] : undefined;
+        const isAfterExtraTime =
+          stageIndicator === "AET" || feed?.AC === "10";
+
         if (hasPeriods) {
           finalHomeScore = String(homeRegScore);
           finalAwayScore = String(awayRegScore);
+        } else if (isAfterExtraTime && feed?.AH != null && feed?.AU != null) {
+          // AET list rows show the final score; feed AH/AU hold regulation time
+          finalHomeScore = feed.AH;
+          finalAwayScore = feed.AU;
         } else {
-          // Football: Flashscore may show "1\n(2)" for AET/penalties — take regulation line only
+          // Penalties show "1\n(2)" — take regulation line only
           finalHomeScore = parseListScore(homeScoreRaw);
           finalAwayScore = parseListScore(awayScoreRaw);
         }
@@ -182,7 +219,7 @@ export const getMatchLinks = async (context, leagueSeasonUrl, type) => {
     }
 
     return matches;
-  });
+  }, type);
 
   await page.close();
 
