@@ -38,6 +38,13 @@ export const getMatchLinks = async (context, leagueSeasonUrl, type) => {
   await page.waitForTimeout(500);
 
   const matchDataList = await page.evaluate(() => {
+    const parseListScore = (raw) => {
+      if (!raw || raw === "-") return null;
+      const firstLine = raw.split("\n")[0]?.trim() ?? "";
+      const numMatch = firstLine.match(/^(\d+)/);
+      return numMatch ? numMatch[1] : null;
+    };
+
     const extractDate = (el) => {
       const candidates = [
         el.querySelector(".event__time"),
@@ -111,45 +118,53 @@ export const getMatchLinks = async (context, leagueSeasonUrl, type) => {
           .querySelector(".event__score--away")
           ?.innerText.trim();
 
-        const isNotStarted = homeScoreRaw === "-" || !homeScoreRaw;
+        let finalHomeScore = null;
+        let finalAwayScore = null;
 
-        let finalHomeScore = homeScoreRaw;
-        let finalAwayScore = awayScoreRaw;
+        // Hockey: sum regulation periods (1-3) when available
+        let homeRegScore = 0;
+        let awayRegScore = 0;
+        let hasPeriods = false;
 
-        if (!isNotStarted) {
-          // Attempt to calculate regulation time score (sum of periods 1-3)
-          let homeRegScore = 0;
-          let awayRegScore = 0;
-          let hasPeriods = false;
-
-          for (let p = 1; p <= 3; p++) {
-            const hPart = el
-              .querySelector(`.event__part--home.event__part--${p}`)
-              ?.innerText.trim();
-            const aPart = el
-              .querySelector(`.event__part--away.event__part--${p}`)
-              ?.innerText.trim();
-            if (hPart && aPart) {
-              homeRegScore += parseInt(hPart, 10);
-              awayRegScore += parseInt(aPart, 10);
+        for (let p = 1; p <= 3; p++) {
+          const hPart = el
+            .querySelector(`.event__part--home.event__part--${p}`)
+            ?.innerText.trim();
+          const aPart = el
+            .querySelector(`.event__part--away.event__part--${p}`)
+            ?.innerText.trim();
+          if (hPart && aPart) {
+            const h = parseInt(hPart, 10);
+            const a = parseInt(aPart, 10);
+            if (!Number.isNaN(h) && !Number.isNaN(a)) {
+              homeRegScore += h;
+              awayRegScore += a;
               hasPeriods = true;
             }
           }
-
-          if (hasPeriods) {
-            finalHomeScore = homeRegScore.toString();
-            finalAwayScore = awayRegScore.toString();
-          }
         }
 
-        const result = isNotStarted
-          ? {}
-          : {
+        if (hasPeriods) {
+          finalHomeScore = String(homeRegScore);
+          finalAwayScore = String(awayRegScore);
+        } else {
+          // Football: Flashscore may show "1\n(2)" for AET/penalties — take regulation line only
+          finalHomeScore = parseListScore(homeScoreRaw);
+          finalAwayScore = parseListScore(awayScoreRaw);
+        }
+
+        const hasValidScore =
+          finalHomeScore !== null && finalAwayScore !== null;
+        const isNotStarted = !hasValidScore;
+
+        const result = hasValidScore
+          ? {
               home: finalHomeScore,
               away: finalAwayScore,
               regulationTime: undefined,
               penalties: undefined,
-            };
+            }
+          : {};
 
         matches.push({
           matchId,
