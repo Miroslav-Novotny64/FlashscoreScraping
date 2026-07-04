@@ -51,9 +51,10 @@ export const getMatchLinks = async (context, leagueSeasonUrl, type) => {
 
       const raw =
         feeds[pageType]?.data ||
+        feeds[`summary-${pageType}`]?.data ||
         (pageType === "results"
-          ? feeds.results?.data
-          : feeds.fixtures?.data);
+          ? feeds.results?.data ?? feeds["summary-results"]?.data
+          : feeds.fixtures?.data ?? feeds["summary-fixtures"]?.data);
       if (!raw) return {};
 
       const byId = {};
@@ -176,16 +177,23 @@ export const getMatchLinks = async (context, leagueSeasonUrl, type) => {
         const feed = matchId ? feedByMatchId[matchId] : undefined;
         const isAfterExtraTime =
           stageIndicator === "AET" || feed?.AC === "10";
+        const isAfterPenalties =
+          stageIndicator === "Pen" || feed?.AC === "11";
+        const hasRegulationFeed =
+          feed?.AT != null && feed?.AU != null;
 
         if (hasPeriods) {
           finalHomeScore = String(homeRegScore);
           finalAwayScore = String(awayRegScore);
-        } else if (isAfterExtraTime && feed?.AH != null && feed?.AU != null) {
-          // AET list rows show the final score; feed AH/AU hold regulation time
-          finalHomeScore = feed.AH;
+        } else if (
+          (isAfterExtraTime || isAfterPenalties) &&
+          hasRegulationFeed
+        ) {
+          // List rows show final score (AET) or "1\n(2)" (Pen); feed AT/AU = regulation
+          finalHomeScore = feed.AT;
           finalAwayScore = feed.AU;
         } else {
-          // Penalties show "1\n(2)" — take regulation line only
+          // Penalties without feed: "1\n(2)" — take regulation line only
           finalHomeScore = parseListScore(homeScoreRaw);
           finalAwayScore = parseListScore(awayScoreRaw);
         }
